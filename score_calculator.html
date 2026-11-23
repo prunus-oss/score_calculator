@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f7fb">
+<title>スコア計算ツール</title>
+<style>
+:root{color-scheme:light;--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#687386;--line:#e5e9f0;--accent:#315efb;--soft:#eef2ff;--shadow:0 8px 28px rgba(28,43,75,.07)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55}
+main{width:min(100% - 28px,620px);margin:0 auto;padding:28px 0 max(32px,env(safe-area-inset-bottom))}header{margin-bottom:20px}h1{font-size:clamp(24px,6vw,30px);letter-spacing:-.03em;margin:0 0 5px}.subtitle{color:var(--muted);font-size:14px;margin:0}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin:14px 0;box-shadow:var(--shadow)}.field{margin:0 0 17px}.field:last-child{margin-bottom:0}
+label,.legend{display:block;font-weight:650;font-size:14px;margin-bottom:7px}input[type=number]{width:100%;min-height:52px;border:1px solid #d9dfeb;border-radius:12px;padding:0 14px;font:inherit;font-size:18px;color:var(--text);background:#fff;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(49,94,251,.12)}.hint{font-size:12px;color:var(--muted);margin:5px 1px 0}
+.segment{display:grid;grid-template-columns:1fr 1fr;gap:8px}.segment label{margin:0;cursor:pointer}.segment input{position:absolute;opacity:0;pointer-events:none}.segment span{display:flex;align-items:center;justify-content:center;min-height:48px;border:1px solid #d9dfeb;border-radius:12px;color:var(--muted);font-weight:650}.segment input:checked+span{background:var(--soft);border-color:var(--accent);color:var(--accent)}
+button{width:100%;min-height:54px;border:0;border-radius:13px;background:var(--accent);color:white;font:inherit;font-size:16px;font-weight:750;cursor:pointer;box-shadow:0 5px 14px rgba(49,94,251,.2);touch-action:manipulation}button:active{filter:brightness(.92);transform:translateY(1px)}button:disabled{opacity:.65;cursor:wait}.error{display:none;color:#b42318;background:#fff1f0;border-radius:10px;padding:11px 13px;font-size:13px;margin-top:12px}
+.results{display:none}.result-top{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.metric{background:#f7f8fc;border:1px solid var(--line);border-radius:13px;padding:13px}.metric small{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:clamp(19px,5vw,24px);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.metric.primary{background:var(--soft);border-color:#dce4ff}.metric.primary strong{color:var(--accent)}.result-heading{font-size:16px;margin:18px 0 9px}.item{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}.item:last-child{border-bottom:0}.item span:first-child{min-width:0}.item b{white-space:nowrap;font-variant-numeric:tabular-nums}.total{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);margin-top:12px;padding-top:15px;font-weight:750}.total strong{font-size:22px;font-variant-numeric:tabular-nums}.note{font-size:12px;color:var(--muted);margin:12px 0 0}footer{text-align:center;color:var(--muted);font-size:11px;padding:12px}@media(min-width:560px){main{padding-top:38px}.panel{padding:24px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>スコア計算ツール</h1><p class="subtitle">目標点に近づく組み合わせを計算します。</p></header>
+<section class="panel" aria-label="計算条件">
+<div class="field"><label for="target">目標点（TARGET）</label><input id="target" type="number" inputmode="numeric" min="0" step="1" value="18000000"></div>
+<div class="field"><label for="fixed">現在点（FIXED）</label><input id="fixed" type="number" inputmode="numeric" min="0" step="1" placeholder="現在の確定点を入力"></div>
+<div class="field"><label for="bonus">特効（％）</label><input id="bonus" type="number" inputmode="decimal" step="any" value="220"><p class="hint">例：220 と入力すると 220% の特効として計算します。</p></div>
+<div class="field"><span class="legend">Expert time clear</span><div class="segment"><label><input type="radio" name="expert" value="yes" checked><span>含める</span></label><label><input type="radio" name="expert" value="no"><span>含めない</span></label></div></div>
+<button id="calculate" type="button">計算する</button><div id="error" class="error" role="alert"></div>
+</section>
+<section id="results" class="panel results" aria-live="polite">
+<div class="result-top"><div class="metric"><small>残り目標点</small><strong id="remaining">—</strong></div><div class="metric primary"><small>最小差</small><strong id="diff">—</strong></div></div>
+<h2 class="result-heading">おすすめの組み合わせ</h2><div id="items"></div><div class="total"><span>最終合計点</span><strong id="total">—</strong></div><p class="note" id="expert-note"></p>
+</section><footer>入力した条件は外部に送信されません。</footer>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),fmt=n=>Math.trunc(n).toLocaleString('ja-JP');
+function buildValues(bonusPercent,useExpert){
+ const bases=[[1500,'通常spot星1'],[1750,'通常spot星2'],[1800,'通常spot星3'],[28900,'通常星3+イベントスポット星3']];
+ const multiplier=1+bonusPercent/100,labels=new Map();
+ for(const [base,name] of bases){labels.set(base,`${name} :0%`);if(bonusPercent!==0){const v=Math.trunc(base*multiplier);labels.set(v,`${name} :${Math.trunc(bonusPercent)}%`);}}
+ if(useExpert){labels.set(29200,'通常星3+Expert time clear :0%');if(bonusPercent!==0){const v=Math.trunc(28900*multiplier)+300;labels.set(v,`通常星3+Expert time clear :${Math.trunc(bonusPercent)}%`);}}
+ return [...labels.keys()].sort((a,b)=>b-a).map(value=>({value,label:labels.get(value)}));
+}
+// 最小スコアを法として剰余ごとの最小到達値を求める。最小スコアを足せるため、到達可能性を正確に判定できる。
+function residueDistances(coins,mod){
+ const size=mod,dist=new Array(size).fill(Infinity),used=new Array(size).fill(false);dist[0]=0;
+ // 値が小さいため、単純な最小距離選択でも十分軽量（剰余は通常1500通り）。
+ for(let step=0;step<size;step++){
+  let u=-1,best=Infinity;for(let r=0;r<size;r++)if(!used[r]&&dist[r]<best){best=dist[r];u=r;}
+  if(u<0)break;used[u]=true;
+  for(const coin of coins){const v=(u+coin)%size,nd=best+coin;if(nd<dist[v])dist[v]=nd;}
+ }
+ return dist;
+}
+function findBest(remaining,values){
+ if(remaining<0)return{sum:0,counts:new Map(),diff:Math.abs(remaining)};
+ const coins=values.map(x=>x.value),mod=Math.min(...coins);
+ const suffixDist=Array(values.length+1);suffixDist[values.length]=null;
+ for(let i=0;i<values.length;i++)suffixDist[i]=residueDistances(coins.slice(i),mod);
+ const dist=suffixDist[0];let bestSum=0;
+ for(let r=0;r<mod;r++)if(Number.isFinite(dist[r])){const candidate=remaining-((remaining-r+mod)%mod);if(candidate>=dist[r]&&candidate>bestSum)bestSum=candidate;}
+ // 元コードの探索順（大きい値から、回数の多い順）と同じ優先順位で組み合わせを確定。
+ let rest=bestSum;const counts=new Map();
+ for(let i=0;i<values.length;i++){
+  const value=values[i].value,limit=Math.floor(rest/value),nextDist=suffixDist[i+1];let chosen=0;
+  if(i===values.length-1){chosen=Math.floor(rest/value);}
+  else for(let c=limit;c>=0;c--){const rem=rest-c*value;if(rem>=nextDist[rem%mod]){chosen=c;break;}}
+  counts.set(value,chosen);rest-=chosen*value;
+ }
+ return{sum:bestSum,counts,diff:remaining-bestSum};
+}
+$('calculate').addEventListener('click',()=>{
+ const target=Number($('target').value),fixed=Number($('fixed').value),bonus=Number($('bonus').value),error=$('error'),results=$('results');error.style.display='none';results.style.display='none';
+ if(!$('target').value.trim()||!$('fixed').value.trim()||!$('bonus').value.trim()||![target,fixed,bonus].every(Number.isFinite)){error.textContent='目標点・現在点・特効％をすべて入力してください。';error.style.display='block';return;}
+ if(target<0||fixed<0||!Number.isSafeInteger(target)||!Number.isSafeInteger(fixed)){error.textContent='目標点と現在点は、0以上の整数で入力してください。';error.style.display='block';return;}
+ if(bonus<0||bonus>100000){error.textContent='特効％は0以上の数値で入力してください。';error.style.display='block';return;}
+ const useExpert=document.querySelector('input[name="expert"]:checked').value==='yes',values=buildValues(bonus,useExpert);
+ if(values.some(x=>!Number.isSafeInteger(x.value)||x.value<=0)){error.textContent='この特効％では計算できないスコアが発生しました。特効％を確認してください。';error.style.display='block';return;}
+ const button=$('calculate');button.disabled=true;button.textContent='計算中…';
+ setTimeout(()=>{try{
+  const remaining=target-fixed,result=findBest(remaining,values);$('remaining').textContent=fmt(remaining);$('diff').textContent=fmt(result.diff);$('items').replaceChildren();let total=fixed;
+  for(const item of values){const count=result.counts.get(item.value)||0;if(count>0){const row=document.createElement('div');row.className='item';const name=document.createElement('span');name.textContent=`${fmt(item.value)}（${item.label}）`;const quantity=document.createElement('b');quantity.textContent=`× ${fmt(count)}`;row.append(name,quantity);$('items').append(row);total+=item.value*count;}}
+  $('total').textContent=fmt(total);$('expert-note').textContent=`Expert time clear：${useExpert?'含める':'含めない'} ／ 特効：${bonus}%`;results.style.display='block';
+ }catch(e){error.textContent='計算中にエラーが発生しました。入力値を確認してください。';error.style.display='block';}finally{button.disabled=false;button.textContent='計算する';}},20);
+});
+</script>
+</body></html>
